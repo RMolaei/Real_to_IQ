@@ -32,7 +32,7 @@ use IEEE.NUMERIC_STD.ALL;
 
 entity Real_to_IQ_Core is
     generic (RealSignalLength : integer := 16;
-        ProductPartslength : integer := 32;
+        ProductPartslength : integer := 40;
         FirOutputProductLenght : integer := 40);
     Port (Clock, Enable : in std_logic;
         --
@@ -82,11 +82,13 @@ architecture Behavioral of Real_to_IQ_Core is
       );
     END COMPONENT;
     signal en : std_logic;
-    signal real_signal, real_signal_reg, x_in_phase, x_quadrature : std_logic_vector(RealSignal'length downto 0);
-    signal StateCounter : std_logic_vector(1 downto 0);
+    signal real_signal, real_signal_reg : std_logic_vector(RealSignal'length-1 downto 0);
+    signal real_signal_reg_p, real_signal_reg_n : std_logic_vector(RealSignal'length-1 downto 0);
+    signal x_in_phase, x_quadrature : std_logic_vector(RealSignal'length-1 downto 0);
     signal s_axis_data_tvalid, s_axis_data_tready, m_axis_data_tvalid, m_axis_data_tready : std_logic;
     signal s_axis_data_tdata : std_logic_vector(2*RealSignalLength-1 downto 0);
     signal m_axis_data_tdata : std_logic_vector(2*FirOutputProductLenght-1 downto 0);
+    signal StateCounter : std_logic_vector(1 downto 0);
 begin
     en <= enable;
     s_axis_data_tvalid <= sAXIsDataTvalid;
@@ -94,8 +96,8 @@ begin
     real_signal <= RealSignal;
     mAXIsDataTvalid <= m_axis_data_tvalid;
     m_axis_data_tready <= mAXIsDataTready;
-    InPhasePart <= m_axis_data_tdata( downto );
-    QuadraturePart <= m_axis_data_tdata( downto );
+    InPhasePart <= m_axis_data_tdata(FirOutputProductLenght-1 downto 0);
+    QuadraturePart <= m_axis_data_tdata(2*FirOutputProductLenght-1 downto FirOutputProductLenght);
     process(Clock)
     begin
         if(rising_edge(Clock)) then
@@ -123,18 +125,28 @@ begin
     begin
         if(rising_edge(Clock)) then
             if(en='1' and s_axis_data_tvalid='1' and s_axis_data_tready='1') then
+                real_signal_reg_p <= real_signal_reg;
+                real_signal_reg_n <= std_logic_vector(-signed(real_signal_reg));
+            end if;
+        end if;
+    end process;
+    process(Clock)
+    begin
+        if(rising_edge(Clock)) then
+            if(en='1' and s_axis_data_tvalid='1' and s_axis_data_tready='1') then
                 StateCounter <= std_logic_vector(unsigned(StateCounter)+1);
             end if;
         end if;
     end process;
     with StateCounter select
-        x_in_phase <= real_signal_reg                             when    "00",
-                      std_logic_vector(-signed(real_signal_reg))  when    "10",
-                      (others => '0')                             when    others;
+        x_in_phase <= real_signal_reg_p when    "00",
+                      real_signal_reg_n when    "10",
+                      (others => '0') when    others;
     with StateCounter select
-        x_quadrature <= std_logic_vector(-signed(real_signal_reg))  when    "01",
-                        real_signal_reg                             when    "00",
-                        (others => '0')                             when    others;
+        x_quadrature <= real_signal_reg_n when    "01",
+                        real_signal_reg_p when    "11",
+                        (others => '0') when    others;
+    ----------------------------------------------------------------------------------
     process(Clock)
     begin
         if(rising_edge(Clock)) then
@@ -144,7 +156,6 @@ begin
             end if;
         end if;
     end process;
-    s_axis_data_tvalid <= en;
     fir_compiler_LowPass_instance : fir_compiler_LowPass
           PORT MAP (
             aclk => Clock,
